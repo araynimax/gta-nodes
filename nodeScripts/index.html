@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    canvas {
+      position: absolute;
+    }
+
+    #canvNodes {
+      height: 8192px;
+      width: 8192px;
+      background-image: url('../interactiveMap/maps/atlas.png');
+      background-size: cover;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="canvNodes" height="8192" width="8192"></canvas>
+  <canvas id="canv" height="8192" width="8192"></canvas>
+  <script>
+    const pointCenter = { x: 0, y: 0 };
+    const pointCenterPx = { x: 3759, y: 5523 };
+    const point1 = { x: -3428.34716796875, y: 983.2879028320312 };
+    const point1Px = { x: 1496, y: 4876 };
+    const point2 = { x: -450.1054992675781, y: -2416.12744140625 };
+    const point2Px = { x: 3459, y: 7115 };
+
+    const distanceFn = (p1, p2) => Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+
+    const distanceMetres = distanceFn(point1, point2);
+    const distancePixels = distanceFn(point1Px, point2Px);
+
+    const scaleFactor = distanceMetres / distancePixels;
+
+
+    function convertGtaCoordsToPx(p) {
+      const x = p.x / scaleFactor;
+      const y = p.y / scaleFactor;
+
+      return { x: Math.round(pointCenterPx.x + x), y: Math.round(pointCenterPx.y - y) };
+    }
+
+    function convertPxToGtaCoords(p) {
+      const x = (p.x - pointCenterPx.x) * scaleFactor;
+      const y = (p.y - pointCenterPx.y) * scaleFactor * -1;
+
+      return { x, y };
+    }
+
+  </script>
+  <script src="./dist/app.js"></script>
+  <script>
+    window.dinge = dinge({
+      distance(fromNode, toNode, link) {
+        // We don't really care about from/to nodes in this case,
+        // const lanesIn = parseInt(link.data['Lanes In'], 10);
+        // const lanesOut = parseInt(link.data['Lanes Out'], 10);
+        // const speed = parseInt(link.data['Speed'], 10);
+        const one_way = link.data['one_way'];
+        const speed = link.data['speed_limit'];
+        // wrong way
+
+        let multiplicator = speed / 100 * -1 + 2;
+
+        //console.log(speed,multiplicator);
+
+        // if (((lanesOut === 0 && fromNode.id === link.fromId) || (lanesIn === 0 && fromNode.id === link.toId))) return Number.MAX_SAFE_INTEGER;
+        if (((one_way === 1 && fromNode.id === link.fromId) || (one_way === 2 && fromNode.id === link.toId))) return Number.MAX_SAFE_INTEGER;
+
+        return Math.sqrt((toNode.data.pos.x - fromNode.data.pos.x) ** 2 + (toNode.data.pos.y - fromNode.data.pos.y) ** 2 + (toNode.data.pos.z - fromNode.data.pos.z) ** 2) * multiplicator;
+      },
+      heuristic(fromNode, toNode) {
+        return Math.sqrt((toNode.data.pos.x - fromNode.data.pos.x) ** 2 + (toNode.data.pos.y - fromNode.data.pos.y) ** 2 + (toNode.data.pos.z - fromNode.data.pos.z) ** 2);
+      }
+    });
+  </script>
+  <script>
+
+    window.ctx = canv.getContext('2d');
+    window.drawPath = (path) => {
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(0,0,255,0.7 )";
+      path.forEach((node, i) => {
+        const coords = convertGtaCoordsToPx(node.data.pos)
+        if (i === 0) {
+          ctx.moveTo(coords.x, coords.y);
+        } else {
+          ctx.lineTo(coords.x, coords.y);
+        }
+
+      });
+
+      ctx.stroke();
+
+    }
+
+    const ctx2 = canvNodes.getContext('2d');
+
+    window.dinge.links.forEach(link => {
+      const coords1 = convertGtaCoordsToPx(dinge.graph.getNode(link.fromId).data.pos);
+      const coords2 = convertGtaCoordsToPx(dinge.graph.getNode(link.toId).data.pos);
+      ctx2.moveTo(coords1.x, coords1.y)
+      ctx2.lineTo(coords2.x, coords2.y)
+      ctx2.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx2.lineWidth = 2;
+    });
+    ctx2.stroke();
+
+
+    window.dinge.nodes.forEach(node => {
+      const coords = convertGtaCoordsToPx(node.pos);
+      ctx2.beginPath();
+      ctx2.arc(coords.x, coords.y, 2, 0, Math.PI * 2);
+      ctx2.fillStyle = 'rgba(0,255,0,0.3)';
+      ctx2.strokeStyle = 'rgba(0,255,0,0.3)';
+      ctx2.lineWidth = 0;
+      ctx2.fill();
+      ctx2.stroke();
+      ctx2.closePath();
+    });
+
+
+  </script>
+  <script>
+    let start = null;
+    let end = null;
+
+
+    const shittyNodes = [];
+
+    const onClick = ({ clientX, clientY }, rightClick = false) => {
+      const { top, left } = canv.getBoundingClientRect();
+      const mousePos = {
+        x: clientX - left,
+        y: clientY - top
+      };
+      let color = '#0F0';
+
+
+      const coords = convertPxToGtaCoords(mousePos);
+      const node = dinge.findNearestNode(coords.x, coords.y);
+
+
+
+      if (node) {
+        const nodePos = convertGtaCoordsToPx(node.data.pos)
+
+
+        if (rightClick) {
+          ctx.clearRect(0, 0, canv.width, canv.height);
+          start = null;
+          end = null;
+          ctx.beginPath();
+          ctx.arc(nodePos.x, nodePos.y, 2, 0, Math.PI * 2);
+          ctx.fillStyle = 'red';
+          ctx.fill();
+          console.log(`NodeID: ${node.id}`)
+          console.log(`Attributes: `, node.data)
+          console.log(`Link: `, node.links)
+        } else {
+          if (start === null || start !== null && end !== null) {
+            start = node.id;
+            color = '#00F';
+            end = null
+            ctx.clearRect(0, 0, canv.width, canv.height);
+          } else if (end === null) {
+            end = node.id;
+            color = '#F00';
+            const route = dinge.pathFinder.find(start, end);
+            window.route = route;
+            if (Array.isArray(route) && route.length) {
+              window.drawPath(route);
+            }
+          }
+
+          ctx.beginPath();
+          ctx.arc(nodePos.x, nodePos.y, 6, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+        }
+
+
+
+      }
+
+
+      // ctx.beginPath();
+      // ctx.arc(mousePos.x, mousePos.y, 10, 0, Math.PI * 2);
+      // ctx.fillStyle = color;
+      // ctx.fill();
+
+    }
+
+    canv.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      onClick(event, true)
+    });
+
+    canv.addEventListener('click', onClick)
+
+  </script>
+</body>
+
+</html>
